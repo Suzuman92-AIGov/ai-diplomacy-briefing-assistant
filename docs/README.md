@@ -17,4 +17,4 @@
 
 ## Screenshots
 
-Screenshot placeholders are available in [`screenshots/`](screenshots/README.md).
+Screenshot placeholders are available in docs/screenshots
