@@ -2,7 +2,7 @@
 
 ### Start Here
 
-![Start Here](docs/screenshots/01_start_here-1.png) 
+![Start Here](/01_start_here-1.png) 
 ![Start Here](docs/screenshots/01_start_here-2.png)
 
 
