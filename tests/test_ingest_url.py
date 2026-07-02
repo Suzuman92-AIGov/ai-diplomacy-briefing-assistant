@@ -6,7 +6,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.api.routes.ingest import ingest_public_url
 from app.api.routes.sources import create_source
-from app.models import AuditLog, Document, Source
+from app.models import AuditLog, Document, Event, EventDocument, Source
 from app.schemas.ingest import UrlIngestRequest
 from app.schemas.source import SourceCreate
 from app.services.ingestion import ExtractedArticle
@@ -19,6 +19,8 @@ def ingest_db_session(tmp_path):
 
     Source.__table__.create(bind=engine)
     Document.__table__.create(bind=engine)
+    Event.__table__.create(bind=engine)
+    EventDocument.__table__.create(bind=engine)
     AuditLog.__table__.create(bind=engine)
 
     TestingSessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
@@ -59,6 +61,7 @@ def test_ingest_url_without_source_id(ingest_db_session, extracted_article):
     assert response.status == "ok"
     assert document.source_id is None
     assert document.url == "https://example.org/no-source"
+    assert ingest_db_session.query(EventDocument).filter_by(document_id=document.id).count() == 1
 
 
 def test_ingest_url_with_valid_source_id(ingest_db_session, extracted_article):
@@ -85,6 +88,7 @@ def test_ingest_url_with_valid_source_id(ingest_db_session, extracted_article):
     document = ingest_db_session.get(Document, response.document_id)
     assert response.status == "ok"
     assert document.source_id == source.id
+    assert ingest_db_session.query(EventDocument).filter_by(document_id=document.id).count() == 1
 
 
 def test_ingest_url_with_invalid_source_id_returns_400(ingest_db_session, monkeypatch):

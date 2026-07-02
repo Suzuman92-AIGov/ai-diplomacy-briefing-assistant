@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     openai_chat_model: str = "gpt-4.1-mini"
 
     default_top_k: int = 6
+    event_near_duplicate_title_threshold: float = 0.92
+    event_semantic_similarity_threshold: float = 0.78
+    event_title_match_window_days: int = 14
 
     model_config = SettingsConfigDict(
         env_file="../.env",

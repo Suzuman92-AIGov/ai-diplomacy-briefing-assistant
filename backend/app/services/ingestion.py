@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.models.document import Document
 from app.models.source import Source
 from app.services.audit import create_audit_log
+from app.services.events import assign_document_to_event
 
 
 @dataclass
@@ -121,5 +122,7 @@ def ingest_url(
         entity_id=str(document.id),
         details=f"Ingested URL: {url}",
     )
+
+    assign_document_to_event(db, document_id=document.id)
 
     return document

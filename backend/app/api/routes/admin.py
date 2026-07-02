@@ -1,7 +1,9 @@
 from fastapi import APIRouter
 from app.db.init_db import init_db
 from app.db.session import get_db
+from app.schemas.event import EventBackfillResponse
 from app.services.seed_sources import ingest_seed_source, ingest_seed_sources_batch, list_recommended_seed_sources, list_seed_sources, load_seed_sources
+from app.services.events import backfill_documents_to_events
 from fastapi import Depends, HTTPException
 from sqlalchemy.orm import Session
 from app.schemas.seed_sources import BatchSeedIngestRequest
@@ -62,3 +64,8 @@ def demo_setup_endpoint(db: Session = Depends(get_db)):
         "loaded_sources": load_result,
         "recommended_ingested": ingest_result,
     }
+
+
+@router.post("/events/backfill", response_model=EventBackfillResponse)
+def backfill_events_endpoint(dry_run: bool = True, db: Session = Depends(get_db)):
+    return backfill_documents_to_events(db, dry_run=dry_run)

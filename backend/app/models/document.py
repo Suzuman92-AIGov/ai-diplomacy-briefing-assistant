@@ -35,3 +35,4 @@ class Document(Base):
     source = relationship("Source", back_populates="documents")
     chunks = relationship("Chunk", back_populates="document", cascade="all, delete-orphan")
     brief_sources = relationship("BriefSource", back_populates="document")
+    event_links = relationship("EventDocument", back_populates="document", cascade="all, delete-orphan")

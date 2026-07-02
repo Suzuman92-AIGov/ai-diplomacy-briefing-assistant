@@ -5,6 +5,7 @@ from app.models.audit_log import AuditLog  # noqa: F401
 from app.models.brief import Brief, BriefSource  # noqa: F401
 from app.models.chunk import Chunk  # noqa: F401
 from app.models.document import Document  # noqa: F401
+from app.models.event import Event, EventDocument  # noqa: F401
 from app.models.source import Source  # noqa: F401
 
 
