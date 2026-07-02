@@ -1,5 +1,7 @@
 # AI Diplomacy Briefing Assistant
 
+> Portfolio note: this document describes the original document/RAG briefing workflow. For the current event-intelligence product overview, see the root [README](../../README.md).
+
 A RAG-style policy briefing assistant for monitoring public-source developments in AI governance, foreign policy, digital policy and public diplomacy.
 
 ## Project Summary

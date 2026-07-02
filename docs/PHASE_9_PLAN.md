@@ -1,5 +1,7 @@
 # Phase 9 Plan
 
+> Historical planning note: this document records the Phase 9 plan as written before later implementation work. Some issues listed here, such as missing tests and the missing frontend PATCH helper, have since been addressed. For current public behavior, see the root [README](../README.md) and [v0.10.0 release notes](RELEASE_NOTES_V0.10.0.md).
+
 This plan turns the audit findings into scoped improvement work. It does not implement the recommendations.
 
 ## A. Critical Fixes
@@ -425,4 +427,3 @@ Review status exists, but roles, transitions, required notes, senior-review trig
 Recommended change:
 
 Add role-aware review transitions, require notes for rejection or senior review, block approval of high-sensitivity briefs without senior role, and store authenticated reviewer identity.
-

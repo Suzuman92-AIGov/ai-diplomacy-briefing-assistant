@@ -1,11 +1,13 @@
 # GitHub Portfolio Checklist
 
+> Historical checklist note: this checklist predates the v0.10.0 documentation release. For current repository presentation suggestions, see [docs/GITHUB_RELEASE_V0.10.0.md](../GITHUB_RELEASE_V0.10.0.md).
+
 ## Required Before Publishing
 
 - [ ] Remove all `.env` files.
 - [ ] Keep only `.env.example`.
 - [ ] Confirm no API keys are committed.
-- [ ] Add screenshots.
+- [ ] Refresh v0.10.0 screenshots using [the screenshot checklist](../screenshots/V0_10_SCREENSHOT_CHECKLIST.md).
 - [ ] Add README.
 - [ ] Add case study.
 - [ ] Add architecture diagram.
@@ -18,14 +20,14 @@
 
 ## Recommended Screenshots
 
-1. Home / System Status
-2. Source Pack
-3. Sources
-4. Ingest URL
-5. Documents with chunk status
-6. Ask Knowledge Base
-7. Generate Brief
-8. Review Briefs
+1. Dashboard
+2. Events overview
+3. Event detail
+4. Evidence timeline
+5. Event Intelligence snapshot/change section
+6. Event brief
+7. PDF ingestion success
+8. Search or RAG
 9. Audit Logs
 
 ## Repository Structure
@@ -37,9 +39,8 @@ ai-diplomacy-briefing-assistant/
   docs/
   data/
   README.md
-  CASE_STUDY.md
-  ARCHITECTURE.md
-  DEMO_SCRIPT.md
+  SETUP.md
+  CHANGELOG.md
   .env.example
   docker-compose.yml
 ```
@@ -50,19 +51,21 @@ Never commit:
 
 ```text
 .env
-OPENAI_API_KEY
-database passwords beyond local demo defaults
+API keys
+database credentials
 personal credentials
 ```
 
 ## Suggested GitHub Description
 
-RAG-style AI governance and foreign policy briefing assistant with curated public-source ingestion, source-grounded answers, structured policy brief generation, human review workflow and audit logging.
+Evidence-first event intelligence prototype for AI governance and policy monitoring, with source-grounded RAG, snapshots, change detection, event briefs and text-PDF ingestion.
 
 ## Suggested GitHub Topics
 
 ```text
 rag
+event-intelligence
+media-intelligence
 ai-governance
 public-policy
 foreign-policy
@@ -72,4 +75,5 @@ streamlit
 postgresql
 pgvector
 responsible-ai
+pdf-ingestion
 ```

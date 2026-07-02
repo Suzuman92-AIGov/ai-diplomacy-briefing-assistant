@@ -1,16 +1,18 @@
 # Technical Audit
 
+> Historical note: this audit describes the repository at an earlier stage. Several findings have since changed, including the missing `api_patch` helper, absence of tests, default frontend API port, event-intelligence support, and PDF ingestion support. For the current public overview, see the root [README](../README.md) and [v0.10.0 release notes](RELEASE_NOTES_V0.10.0.md).
+
 This audit is read-only with respect to application code. The only repository changes made for the audit are the requested documentation files.
 
 ## Executive Summary
 
 The repository implements a clear local demo of a source-grounded briefing workflow, but it is not yet production-ready. The strongest parts are the simple end-to-end flow, curated seed source pack, local/offline demo mode, and explicit governance concepts. The biggest risks are lack of migrations, weak ingestion reliability, retrieval quality limits, missing tests, no auth, permissive free-form data contracts, and incomplete citation immutability.
 
-Critical defects found:
+Critical defects found at the time of the audit:
 
-- The Streamlit review workflow is broken because `api_patch` is called but not defined in `frontend/streamlit_app.py:497-506`.
+- The Streamlit review workflow was broken because `api_patch` was called but not defined in `frontend/streamlit_app.py:497-506`. The current frontend includes `api_patch`.
 - There is no migration framework; schema creation depends on `Base.metadata.create_all` in `backend/app/db/init_db.py:11-15`.
-- There are no tests in the repository.
+- At the time of the audit, there were no tests in the repository. The current repository includes pytest tests under `tests/`.
 - Admin, ingestion, export, and review endpoints have no authentication or authorization.
 - Citation traceability is reference-based but not immutable because `BriefSource` stores only IDs and a label in `backend/app/models/brief.py:34-42`.
 
@@ -200,8 +202,8 @@ Current frontend:
 
 Findings:
 
-- The Review Briefs save action is broken because `api_patch` is undefined.
-- `API_BASE_URL` defaults to `http://localhost:8000` in `frontend/streamlit_app.py:7`, while setup docs use backend port `8002`.
+- Historical finding: the Review Briefs save action was broken because `api_patch` was undefined. The current frontend includes `api_patch`.
+- The current `API_BASE_URL` default is `http://localhost:8002`.
 - The app exposes too many workflow pages at once for non-technical users.
 - Document preparation is manual per document. Users must know to chunk and embed before asking.
 - Local mode search does not require embeddings, but UI language says "Generate embeddings" and "Searchable chunks", which can mislead users.
@@ -219,9 +221,9 @@ Recommendations:
 
 ## 8. Testing Coverage
 
-Current state:
+Historical state at the time of this audit:
 
-- No test files were found under `backend` or `frontend`.
+- No test files were found under `backend` or `frontend` at the time. The current repository includes pytest coverage under `tests/`.
 - No pytest config, CI workflow, or test database setup exists.
 - Python files parse successfully with `ast.parse`, but no behavioral tests were run.
 
@@ -298,4 +300,3 @@ Production blockers:
 - immutable citation snapshots
 - retrieval evaluation
 - dependency pinning and environment hardening
-

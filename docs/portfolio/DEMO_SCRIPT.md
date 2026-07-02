@@ -1,5 +1,7 @@
 # Demo Script
 
+> Portfolio note: this script demonstrates the older document/RAG briefing workflow. For the current v0.10.0 event-intelligence workflow, see the root [README](../../README.md) and [release notes](../RELEASE_NOTES_V0.10.0.md).
+
 ## Goal
 
 Demonstrate that the app can ingest public AI governance sources, retrieve relevant material, generate a source-grounded answer, create a structured policy brief, and route the brief through review.
@@ -12,22 +14,21 @@ Backend:
 
 ```bash
 cd backend
-source .venv/bin/activate
+source ../.venv/bin/activate
 python3 -m uvicorn app.main:app --reload --port 8002
 ```
 
 Frontend:
 
 ```bash
-cd frontend
 source .venv/bin/activate
-API_BASE_URL=http://localhost:8002 python3 -m streamlit run streamlit_app.py --server.port 8502
+python3 -m streamlit run frontend/streamlit_app.py --server.port 8501
 ```
 
 Open:
 
 ```text
-http://localhost:8502
+http://localhost:8501
 ```
 
 ## Demo Steps

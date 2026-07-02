@@ -1,5 +1,7 @@
 # Phase 10A Reliable PDF Ingestion
 
+> Phase note: this document describes the reliable text-based PDF ingestion work introduced in Phase 10A. For the current public overview, see the root [README](../README.md).
+
 ## 1. Current HTML Ingestion Flow
 
 The current `/ingest/url` route delegates to `backend/app/services/ingestion.py`. The service checks for an exact `Document.url` duplicate, validates `source_id`, calls `trafilatura.fetch_url`, extracts article text and metadata, normalizes text, creates a `Document`, writes an audit log, and assigns the document to a Phase 9A event.

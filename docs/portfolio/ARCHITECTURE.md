@@ -1,5 +1,7 @@
 # Architecture
 
+> Portfolio note: this document describes the earlier document/RAG architecture. The current v0.10.0 public architecture adds events, snapshots, change detection, event briefs, and reliable text-based PDF ingestion. See the root [README](../../README.md) and [current architecture notes](../CURRENT_ARCHITECTURE.md).
+
 ## System Overview
 
 ```mermaid

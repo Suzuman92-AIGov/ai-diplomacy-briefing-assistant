@@ -1,5 +1,7 @@
 # Phase 9C Event Briefing And Change Intelligence
 
+> Historical phase note: this document describes snapshot, change, and event-brief architecture introduced in Phase 9C. Later Phase 10A work added reliable text-based PDF ingestion. For current public behavior, see the root [README](../README.md) and [Phase 10A PDF ingestion](PHASE_10A_PDF_INGESTION.md).
+
 ## 1. Existing Event And Briefing Flow
 
 Phase 9A adds event grouping after URL ingestion. Original `Document` rows remain the evidence layer, and each document may be linked to an `Event` through `EventDocument`. Phase 9B adds a Streamlit Events page that lists events, opens event detail, displays evidence rows, shows timelines, and exposes manual reclustering.
