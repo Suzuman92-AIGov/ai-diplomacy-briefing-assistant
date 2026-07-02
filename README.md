@@ -360,6 +360,33 @@ git diff --check
 - [Architecture notes](docs/CURRENT_ARCHITECTURE.md)
 - [Portfolio case study](docs/portfolio/CASE_STUDY.md)
 
+## Product screenshots
+
+### Events overview
+
+Browse event-level intelligence, filter events, and inspect document and source coverage.
+
+![Events overview](docs/screenshots/v0.10/01_events_overview.png)
+
+### Event detail and supporting evidence
+
+Inspect event metadata and the original documents preserved as the evidence layer.
+
+![Event detail and supporting evidence](docs/screenshots/v0.10/02_event_evidence_timeline.png)
+
+### Change intelligence
+
+Create immutable snapshots and compare the current event state with its previous baseline.
+
+![Change intelligence](docs/screenshots/v0.10/03_change_intelligence.png)
+
+### Event brief
+
+Generate a structured event brief with confirmed points, uncertainties, and evidence references.
+
+![Event brief](docs/screenshots/v0.10/04_event_brief.png)
+
 ## License
 
 MIT. See [LICENSE](LICENSE).
+
