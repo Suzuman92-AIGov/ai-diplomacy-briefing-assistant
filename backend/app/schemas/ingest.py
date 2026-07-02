@@ -1,9 +1,9 @@
-from pydantic import BaseModel, HttpUrl
+from pydantic import BaseModel, Field, HttpUrl
 
 
 class UrlIngestRequest(BaseModel):
     url: HttpUrl
-    source_id: int | None = None
+    source_id: int | None = Field(default=None, gt=0)
     topic_tags: str | None = None
     sensitivity_level: str = "medium"
     language: str | None = None

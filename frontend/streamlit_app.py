@@ -4,7 +4,8 @@ import streamlit as st
 from dotenv import load_dotenv
 
 load_dotenv("../.env")
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
+DEFAULT_API_BASE_URL = "http://localhost:8002"
+API_BASE_URL = os.getenv("API_BASE_URL", DEFAULT_API_BASE_URL).rstrip("/")
 
 st.set_page_config(page_title="AI Diplomacy Briefing Assistant", page_icon="🛰️", layout="wide")
 st.title("AI Diplomacy Briefing Assistant")
@@ -28,6 +29,80 @@ def api_post(path: str, payload: dict | None = None):
     r = requests.post(f"{API_BASE_URL}{path}", json=payload, timeout=180)
     r.raise_for_status()
     return r.json()
+
+def api_patch(path: str, payload: dict | None = None):
+    r = requests.patch(f"{API_BASE_URL}{path}", json=payload, timeout=60)
+    r.raise_for_status()
+    return r.json()
+
+
+NO_SOURCE_SELECTED_LABEL = "No source selected"
+
+
+def normalize_source_name(name: str) -> str:
+    return " ".join(name.split())
+
+
+def find_source_by_name(sources: list[dict], name: str) -> dict | None:
+    normalized_name = normalize_source_name(name).lower()
+    for source in sources:
+        if normalize_source_name(source.get("name", "")).lower() == normalized_name:
+            return source
+    return None
+
+
+def build_source_create_payload(
+    *,
+    name: str,
+    base_url: str,
+    source_type: str,
+    reliability_tier: str,
+    country_or_institution: str,
+    notes: str,
+    is_active: bool,
+) -> dict:
+    return {
+        "name": normalize_source_name(name),
+        "base_url": base_url.strip() or None,
+        "source_type": source_type,
+        "reliability_tier": reliability_tier,
+        "country_or_institution": country_or_institution.strip() or None,
+        "notes": notes.strip() or None,
+        "is_active": is_active,
+    }
+
+
+def build_url_ingest_payload(
+    *,
+    url: str,
+    source_id: int | None,
+    topic_tags: str,
+    sensitivity_level: str,
+    language: str,
+) -> dict:
+    payload = {
+        "url": url,
+        "topic_tags": topic_tags,
+        "sensitivity_level": sensitivity_level,
+        "language": language,
+    }
+    if source_id is not None and source_id > 0:
+        payload["source_id"] = source_id
+    return payload
+
+
+def get_api_error_detail(exc: Exception) -> str:
+    response = getattr(exc, "response", None)
+    if response is None:
+        return str(exc)
+
+    try:
+        payload = response.json()
+    except ValueError:
+        return response.text or str(exc)
+
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    return str(detail or payload or exc)
 
 
 
@@ -173,6 +248,11 @@ elif page == "System Status":
 
 elif page == "Sources":
     st.subheader("Approved Source Library")
+    try:
+        existing_sources = api_get("/sources")
+    except Exception:
+        existing_sources = []
+
     with st.form("create_source_form"):
         name = st.text_input("Source name", value="European Commission - AI")
         base_url = st.text_input("Base URL", value="https://digital-strategy.ec.europa.eu/")
@@ -183,9 +263,28 @@ elif page == "Sources":
         is_active = st.checkbox("Active", value=True)
         if st.form_submit_button("Add source"):
             try:
-                result = api_post("/sources", {"name": name, "base_url": base_url, "source_type": source_type, "reliability_tier": reliability_tier, "country_or_institution": country_or_institution, "notes": notes, "is_active": is_active})
-                st.success(f"Created source: {result['name']}")
-            except Exception as exc: st.error("Could not create source."); st.code(str(exc))
+                existing_source = find_source_by_name(existing_sources, name)
+                if existing_source:
+                    result = existing_source
+                    st.info(f"Using existing source ID {result['id']}: {result['name']}")
+                else:
+                    result = api_post(
+                        "/sources",
+                        build_source_create_payload(
+                            name=name,
+                            base_url=base_url,
+                            source_type=source_type,
+                            reliability_tier=reliability_tier,
+                            country_or_institution=country_or_institution,
+                            notes=notes,
+                            is_active=is_active,
+                        ),
+                    )
+                    st.success(f"Source ready: {result['name']} (ID {result['id']})")
+                st.json(result)
+            except Exception as exc:
+                st.error("Could not create or reuse source.")
+                st.code(get_api_error_detail(exc))
     try: st.dataframe(api_get("/sources"), use_container_width=True)
     except Exception as exc: st.warning("Could not load sources."); st.code(str(exc))
 
@@ -270,7 +369,10 @@ elif page == "Ingest URL":
     st.subheader("Ingest a public URL")
     try: sources = api_get("/sources")
     except Exception: sources = []
-    source_options = {"No source selected": None} | {f"{s['id']} — {s['name']} ({s['reliability_tier']})": s["id"] for s in sources}
+    source_options = {NO_SOURCE_SELECTED_LABEL: None} | {
+        f"Source ID {s['id']}: {s['name']} ({s['reliability_tier']})": s["id"]
+        for s in sources
+    }
     with st.form("ingest_url_form"):
         url = st.text_input("Public URL", value="https://digital-strategy.ec.europa.eu/en/policies/regulatory-framework-ai")
         source_label = st.selectbox("Source", list(source_options.keys()))
@@ -280,9 +382,20 @@ elif page == "Ingest URL":
         if st.form_submit_button("Ingest URL"):
             try:
                 with st.spinner("Extracting and saving document..."):
-                    st.json(api_post("/ingest/url", {"url": url, "source_id": source_options[source_label], "topic_tags": topic_tags, "sensitivity_level": sensitivity_level, "language": language}))
+                    st.json(api_post(
+                        "/ingest/url",
+                        build_url_ingest_payload(
+                            url=url,
+                            source_id=source_options[source_label],
+                            topic_tags=topic_tags,
+                            sensitivity_level=sensitivity_level,
+                            language=language,
+                        ),
+                    ))
                 st.success("Document ingested.")
-            except Exception as exc: st.error("Could not ingest URL."); st.code(str(exc))
+            except Exception as exc:
+                st.error("Could not ingest URL.")
+                st.code(get_api_error_detail(exc))
 
 
 elif page == "Documents":
