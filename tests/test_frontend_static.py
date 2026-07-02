@@ -131,6 +131,77 @@ def sample_document(**overrides):
     return document
 
 
+def sample_snapshot(**overrides):
+    snapshot = {
+        "id": 1,
+        "event_id": 1,
+        "snapshot_type": "baseline",
+        "event_title": "NIST publishes AI RMF update",
+        "event_status": "active",
+        "event_type": "development",
+        "document_count": 1,
+        "distinct_source_count": 1,
+        "distinct_publisher_count": 1,
+        "document_ids": [10],
+        "source_names": ["NIST"],
+        "publisher_names": ["NIST"],
+        "evidence_items": [sample_document()],
+        "latest_evidence_at": "2026-07-02T10:00:00",
+        "snapshot_hash": "abc123",
+        "created_at": "2026-07-02T11:00:00",
+    }
+    snapshot.update(overrides)
+    return snapshot
+
+
+def sample_change(**overrides):
+    change = {
+        "has_changes": False,
+        "change_level": "none",
+        "is_initial_baseline": True,
+        "new_document_ids": [],
+        "removed_document_ids": [],
+        "new_sources": [],
+        "removed_sources": [],
+        "new_publishers": [],
+        "removed_publishers": [],
+        "document_count_delta": 0,
+        "source_count_delta": 0,
+        "publisher_count_delta": 0,
+        "metadata_changes": {},
+        "latest_evidence_at_changed": False,
+        "summary_changed": False,
+        "deterministic_change_summary": "Initial event baseline - no previous snapshot is available for comparison.",
+    }
+    change.update(overrides)
+    return change
+
+
+def sample_brief(**overrides):
+    brief = {
+        "id": 5,
+        "event_id": 1,
+        "snapshot_id": 1,
+        "previous_snapshot_id": None,
+        "brief_status": "draft",
+        "headline": "NIST publishes AI RMF update",
+        "what_happened": "The event is represented by one document.",
+        "what_changed": "Initial event baseline - no previous snapshot is available for comparison.",
+        "why_it_matters": "Review source coverage before external use.",
+        "confirmed_points": ["Snapshot contains 1 evidence document."],
+        "uncertainties": ["No previous snapshot is available."],
+        "watch_next": ["Monitor new evidence."],
+        "evidence_document_ids": [10],
+        "evidence_items": [sample_document()],
+        "change_summary": sample_change(),
+        "generation_method": "deterministic",
+        "created_at": "2026-07-02T11:05:00",
+        "updated_at": "2026-07-02T11:05:00",
+    }
+    brief.update(overrides)
+    return brief
+
+
 def test_event_list_response_parsing_handles_optional_metadata():
     parse_events = _load_streamlit_function("parse_event_list_response")
 
@@ -161,6 +232,50 @@ def test_event_detail_and_documents_response_parsing():
 
     assert detail["related_documents"][0]["document_title"] == "NIST AI RMF article"
     assert documents[0]["publisher"] == ""
+
+
+def test_event_intelligence_response_parsing():
+    namespace = _load_streamlit_namespace()
+
+    snapshot = namespace["parse_event_snapshot_response"](sample_snapshot())
+    snapshots = namespace["parse_event_snapshots_response"]([sample_snapshot(id=2)])
+    change = namespace["normalize_event_change_payload"](sample_change())
+    brief = namespace["parse_event_brief_response"](sample_brief())
+    briefs = namespace["parse_event_briefs_response"]([sample_brief(id=6)])
+    created = namespace["parse_event_snapshot_create_response"](
+        {"status": "ok", "reused": False, "snapshot": sample_snapshot()}
+    )
+    generated = namespace["parse_event_brief_generate_response"](
+        {"status": "ok", "reused": False, "brief": sample_brief(), "change": sample_change()}
+    )
+
+    assert snapshot["document_count"] == 1
+    assert snapshots[0]["id"] == 2
+    assert change["is_initial_baseline"] is True
+    assert change["has_changes"] is False
+    assert change["change_level"] == "none"
+    assert brief["generation_method"] == "deterministic"
+    assert briefs[0]["id"] == 6
+    assert created["snapshot"]["id"] == 1
+    assert generated["brief"]["id"] == 5
+
+
+def test_snapshot_history_change_level():
+    change_level = _load_streamlit_function("snapshot_history_change_level")
+    baseline = sample_snapshot()
+    same = sample_snapshot(id=2)
+    minor = sample_snapshot(id=3, snapshot_hash="def456", document_ids=[10, 11])
+    meaningful = sample_snapshot(
+        id=4,
+        snapshot_hash="ghi789",
+        document_ids=[10, 11, 12],
+        publisher_names=["NIST", "OECD"],
+    )
+
+    assert change_level(None, baseline) == "baseline"
+    assert change_level(baseline, same) == "none"
+    assert change_level(baseline, minor) == "minor"
+    assert change_level(minor, meaningful) == "meaningful"
 
 
 def test_empty_event_list_and_filtered_empty_result():
@@ -243,6 +358,8 @@ def test_date_similarity_and_clustering_formatting():
     assert namespace["clustering_method_label"]("new_event") == "Created as a new event"
     assert namespace["clustering_method_label"]("normalized_url") == "Matched by normalized URL"
     assert namespace["clustering_method_label"]("unseen_method") == "Unknown method (unseen method)"
+    assert namespace["format_signed_delta"](2, "document") == "+2 documents"
+    assert namespace["format_signed_delta"](-1, "source") == "-1 source"
 
 
 def test_malformed_api_response_and_concise_errors():
@@ -343,6 +460,7 @@ def test_no_mixed_language_labels_or_placeholder_images_added():
 
     assert "Search title or summary" in source
     assert "Supporting documents and evidence" in source
+    assert "Event Intelligence" in source
     for serbian_word in ["Dokumenti", "Pretraga", "Izvori", "Događaji", "Dogadjaji"]:
         assert serbian_word not in source
     for placeholder in ["placeholder.com", "placehold.co", "loremflickr", "unsplash"]:
@@ -354,3 +472,25 @@ def test_reclustering_runs_only_after_explicit_button_interaction():
 
     assert 'if st.button("Recluster selected document")' in source
     assert "result = recluster_document(recluster_document_id)" in source
+
+
+def test_event_intelligence_actions_are_explicit_and_cache_clearing_is_present():
+    source = STREAMLIT_APP.read_text(encoding="utf-8")
+
+    assert 'if st.button("Create snapshot")' in source
+    assert 'if st.button("Generate event brief")' in source
+    assert 'if st.button("Refresh intelligence")' in source
+    assert "create_event_snapshot(selected_event_id)" in source
+    assert "generate_event_brief(selected_event_id)" in source
+    assert "clear_event_cache(selected_event_id)" in source
+
+
+def test_event_intelligence_wording_history_and_evidence_links_are_present():
+    source = STREAMLIT_APP.read_text(encoding="utf-8")
+
+    assert "Initial event baseline - no previous snapshot is available for comparison." in source
+    assert "No meaningful change detected since the previous snapshot." in source
+    assert "Snapshot and brief history" in source
+    assert "Latest Event Brief" in source
+    assert "Evidence links" in source
+    assert "No event snapshot exists yet." in source

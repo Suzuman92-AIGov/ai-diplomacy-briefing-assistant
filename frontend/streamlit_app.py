@@ -343,6 +343,112 @@ def parse_event_documents_response(payload) -> list[dict]:
     return [normalize_event_document_payload(item) for item in payload]
 
 
+def normalize_event_snapshot_payload(item: dict) -> dict:
+    if not isinstance(item, dict):
+        raise FrontendAPIError("Event snapshot data is malformed.")
+    snapshot_id = _to_int(item.get("id"), default=-1)
+    if snapshot_id < 0:
+        raise FrontendAPIError("Event snapshot data is incomplete.")
+    snapshot = dict(item)
+    snapshot["id"] = snapshot_id
+    snapshot["event_id"] = _to_int(item.get("event_id"), 0)
+    snapshot["snapshot_type"] = _safe_text(item.get("snapshot_type"))
+    snapshot["event_title"] = _safe_text(item.get("event_title"))
+    snapshot["document_count"] = _to_int(item.get("document_count"), 0)
+    snapshot["distinct_source_count"] = _to_int(item.get("distinct_source_count"), 0)
+    snapshot["distinct_publisher_count"] = _to_int(item.get("distinct_publisher_count"), 0)
+    snapshot["document_ids"] = item.get("document_ids") if isinstance(item.get("document_ids"), list) else []
+    snapshot["source_names"] = item.get("source_names") if isinstance(item.get("source_names"), list) else []
+    snapshot["publisher_names"] = item.get("publisher_names") if isinstance(item.get("publisher_names"), list) else []
+    snapshot["evidence_items"] = item.get("evidence_items") if isinstance(item.get("evidence_items"), list) else []
+    snapshot["snapshot_hash"] = _safe_text(item.get("snapshot_hash"))
+    return snapshot
+
+
+def parse_event_snapshot_response(payload) -> dict:
+    return normalize_event_snapshot_payload(payload)
+
+
+def parse_event_snapshots_response(payload) -> list[dict]:
+    if not isinstance(payload, list):
+        raise FrontendAPIError("Event snapshots response was malformed.")
+    return [normalize_event_snapshot_payload(item) for item in payload]
+
+
+def normalize_event_change_payload(item: dict) -> dict:
+    if not isinstance(item, dict):
+        raise FrontendAPIError("Event change data is malformed.")
+    change = dict(item)
+    change["has_changes"] = bool(item.get("has_changes"))
+    change["change_level"] = _safe_text(item.get("change_level")) or "none"
+    change["is_initial_baseline"] = bool(item.get("is_initial_baseline"))
+    for field in [
+        "new_document_ids",
+        "removed_document_ids",
+        "new_sources",
+        "removed_sources",
+        "new_publishers",
+        "removed_publishers",
+    ]:
+        change[field] = item.get(field) if isinstance(item.get(field), list) else []
+    change["document_count_delta"] = _to_int(item.get("document_count_delta"), 0)
+    change["source_count_delta"] = _to_int(item.get("source_count_delta"), 0)
+    change["publisher_count_delta"] = _to_int(item.get("publisher_count_delta"), 0)
+    change["metadata_changes"] = item.get("metadata_changes") if isinstance(item.get("metadata_changes"), dict) else {}
+    change["deterministic_change_summary"] = _safe_text(item.get("deterministic_change_summary"))
+    return change
+
+
+def normalize_event_brief_payload(item: dict) -> dict:
+    if not isinstance(item, dict):
+        raise FrontendAPIError("Event brief data is malformed.")
+    brief_id = _to_int(item.get("id"), default=-1)
+    if brief_id < 0:
+        raise FrontendAPIError("Event brief data is incomplete.")
+    brief = dict(item)
+    brief["id"] = brief_id
+    brief["event_id"] = _to_int(item.get("event_id"), 0)
+    brief["snapshot_id"] = _to_int(item.get("snapshot_id"), 0)
+    brief["headline"] = _safe_text(item.get("headline")) or f"Event brief {brief_id}"
+    brief["brief_status"] = _safe_text(item.get("brief_status")) or "draft"
+    brief["generation_method"] = _safe_text(item.get("generation_method")) or "deterministic"
+    for field in ["confirmed_points", "uncertainties", "watch_next", "evidence_document_ids", "evidence_items"]:
+        brief[field] = item.get(field) if isinstance(item.get(field), list) else []
+    brief["change_summary"] = item.get("change_summary") if isinstance(item.get("change_summary"), dict) else {}
+    return brief
+
+
+def parse_event_briefs_response(payload) -> list[dict]:
+    if not isinstance(payload, list):
+        raise FrontendAPIError("Event briefs response was malformed.")
+    return [normalize_event_brief_payload(item) for item in payload]
+
+
+def parse_event_brief_response(payload) -> dict:
+    return normalize_event_brief_payload(payload)
+
+
+def parse_event_snapshot_create_response(payload) -> dict:
+    if not isinstance(payload, dict) or "snapshot" not in payload:
+        raise FrontendAPIError("Snapshot response was malformed.")
+    return {
+        "status": _safe_text(payload.get("status")) or "ok",
+        "reused": bool(payload.get("reused")),
+        "snapshot": parse_event_snapshot_response(payload["snapshot"]),
+    }
+
+
+def parse_event_brief_generate_response(payload) -> dict:
+    if not isinstance(payload, dict) or "brief" not in payload or "change" not in payload:
+        raise FrontendAPIError("Event brief generation response was malformed.")
+    return {
+        "status": _safe_text(payload.get("status")) or "ok",
+        "reused": bool(payload.get("reused")),
+        "brief": parse_event_brief_response(payload["brief"]),
+        "change": normalize_event_change_payload(payload["change"]),
+    }
+
+
 def event_source_count(event: dict) -> int:
     return max(
         _to_int(event.get("distinct_source_count"), 0),
@@ -508,7 +614,15 @@ def clear_event_cache(event_id: int | None = None) -> None:
     if event_id is None:
         cache.clear()
         return
-    for key in ["events:list", f"events:detail:{event_id}", f"events:documents:{event_id}"]:
+    for key in [
+        "events:list",
+        f"events:detail:{event_id}",
+        f"events:documents:{event_id}",
+        f"events:snapshots:{event_id}",
+        f"events:snapshot_latest:{event_id}",
+        f"events:changes:{event_id}",
+        f"events:briefs:{event_id}",
+    ]:
         cache.pop(key, None)
 
 
@@ -543,6 +657,107 @@ def recluster_document(document_id: int) -> dict:
     if payload.get("status") != "ok":
         raise FrontendAPIError("Reclustering did not complete.")
     return payload
+
+
+def get_event_snapshots(event_id: int, force_refresh: bool = False) -> list[dict]:
+    return _cached_event_fetch(
+        f"events:snapshots:{event_id}",
+        lambda: parse_event_snapshots_response(api_get(f"/events/{event_id}/snapshots")),
+        force_refresh=force_refresh,
+    )
+
+
+def get_latest_event_snapshot(event_id: int, force_refresh: bool = False) -> dict | None:
+    def fetch_latest():
+        try:
+            return parse_event_snapshot_response(api_get(f"/events/{event_id}/snapshots/latest"))
+        except FrontendAPIError as exc:
+            if "No event snapshot exists" in exc.message:
+                return None
+            raise
+
+    return _cached_event_fetch(
+        f"events:snapshot_latest:{event_id}",
+        fetch_latest,
+        force_refresh=force_refresh,
+    )
+
+
+def get_event_changes(event_id: int, force_refresh: bool = False) -> dict | None:
+    def fetch_changes():
+        try:
+            return normalize_event_change_payload(api_get(f"/events/{event_id}/changes"))
+        except FrontendAPIError as exc:
+            if "No event snapshot exists" in exc.message:
+                return None
+            raise
+
+    return _cached_event_fetch(
+        f"events:changes:{event_id}",
+        fetch_changes,
+        force_refresh=force_refresh,
+    )
+
+
+def get_event_briefs(event_id: int, force_refresh: bool = False) -> list[dict]:
+    return _cached_event_fetch(
+        f"events:briefs:{event_id}",
+        lambda: parse_event_briefs_response(api_get(f"/events/{event_id}/briefs")),
+        force_refresh=force_refresh,
+    )
+
+
+def create_event_snapshot(event_id: int, *, force: bool = False) -> dict:
+    return parse_event_snapshot_create_response(
+        api_post(f"/events/{event_id}/snapshots", timeout=60, payload=None)
+        if not force
+        else api_post(f"/events/{event_id}/snapshots?force=true", timeout=60, payload=None)
+    )
+
+
+def generate_event_brief(event_id: int, *, force: bool = False) -> dict:
+    return parse_event_brief_generate_response(
+        api_post(f"/events/{event_id}/briefs/generate", timeout=120, payload=None)
+        if not force
+        else api_post(f"/events/{event_id}/briefs/generate?force=true", timeout=120, payload=None)
+    )
+
+
+def format_signed_delta(value: int, singular: str, plural: str | None = None) -> str:
+    count = _to_int(value, 0)
+    label = singular if abs(count) == 1 else (plural or f"{singular}s")
+    sign = "+" if count > 0 else ""
+    return f"{sign}{count} {label}"
+
+
+def snapshot_history_change_level(previous_snapshot: dict | None, current_snapshot: dict) -> str:
+    if previous_snapshot is None:
+        return "baseline"
+    if previous_snapshot.get("snapshot_hash") == current_snapshot.get("snapshot_hash"):
+        return "none"
+
+    previous_documents = set(previous_snapshot.get("document_ids") or [])
+    current_documents = set(current_snapshot.get("document_ids") or [])
+    previous_publishers = set(previous_snapshot.get("publisher_names") or [])
+    current_publishers = set(current_snapshot.get("publisher_names") or [])
+    previous_sources = set(previous_snapshot.get("source_names") or [])
+    current_sources = set(current_snapshot.get("source_names") or [])
+
+    new_documents = current_documents - previous_documents
+    new_publishers = current_publishers - previous_publishers
+    new_sources = current_sources - previous_sources
+    metadata_changed = any(
+        previous_snapshot.get(field) != current_snapshot.get(field)
+        for field in ["event_status", "event_type", "country_or_region", "primary_language", "event_summary"]
+    )
+
+    if len(new_publishers) + len(new_sources) >= 3 and (metadata_changed or len(new_documents) >= 3):
+        return "major"
+    if metadata_changed or new_publishers or new_sources or len(new_documents) >= 3:
+        return "meaningful"
+    if new_documents:
+        return "minor"
+    return "none"
 
 
 def get_api_error_detail(exc: Exception) -> str:
@@ -870,6 +1085,165 @@ elif page == "Events":
                 if metadata_rows:
                     st.write("#### Event-level metadata")
                     st.dataframe(metadata_rows, use_container_width=True, hide_index=True)
+
+                st.write("#### Event Intelligence")
+                try:
+                    latest_snapshot = get_latest_event_snapshot(selected_event_id)
+                    latest_change = get_event_changes(selected_event_id) if latest_snapshot else None
+                    event_briefs = get_event_briefs(selected_event_id)
+                    event_snapshots = get_event_snapshots(selected_event_id)
+                except Exception as exc:
+                    st.error(get_api_error_detail(exc))
+                    latest_snapshot = None
+                    latest_change = None
+                    event_briefs = []
+                    event_snapshots = []
+
+                intelligence_cols = st.columns(3)
+                with intelligence_cols[0]:
+                    if st.button("Create snapshot"):
+                        try:
+                            with st.spinner("Creating event snapshot..."):
+                                result = create_event_snapshot(selected_event_id)
+                            clear_event_cache(selected_event_id)
+                            message = "Snapshot reused." if result["reused"] else "Snapshot created."
+                            st.success(f"{message} Snapshot ID {result['snapshot']['id']}.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(get_api_error_detail(exc))
+                with intelligence_cols[1]:
+                    if st.button("Generate event brief"):
+                        try:
+                            with st.spinner("Generating event brief..."):
+                                result = generate_event_brief(selected_event_id)
+                            clear_event_cache(selected_event_id)
+                            message = "Existing event brief reused." if result["reused"] else "Event brief generated."
+                            st.success(f"{message} Brief ID {result['brief']['id']}.")
+                            st.rerun()
+                        except Exception as exc:
+                            st.error(get_api_error_detail(exc))
+                with intelligence_cols[2]:
+                    if st.button("Refresh intelligence"):
+                        clear_event_cache(selected_event_id)
+                        st.success("Event intelligence refreshed.")
+                        st.rerun()
+
+                if latest_snapshot:
+                    state_cols = st.columns(4)
+                    state_cols[0].metric("Latest snapshot", format_datetime_value(latest_snapshot.get("created_at")))
+                    state_cols[1].metric("Snapshot documents", latest_snapshot.get("document_count", 0))
+                    state_cols[2].metric("Snapshot publishers", latest_snapshot.get("distinct_publisher_count", 0))
+                    state_cols[3].metric(
+                        "Change level",
+                        (latest_change or {}).get("change_level", "Not available"),
+                    )
+
+                    if latest_change:
+                        change_cols = st.columns(3)
+                        change_cols[0].metric(
+                            "New documents",
+                            format_signed_delta(len(latest_change.get("new_document_ids", [])), "document"),
+                        )
+                        change_cols[1].metric(
+                            "New sources",
+                            format_signed_delta(len(latest_change.get("new_sources", [])), "source"),
+                        )
+                        change_cols[2].metric(
+                            "New publishers",
+                            format_signed_delta(len(latest_change.get("new_publishers", [])), "publisher"),
+                        )
+                        if latest_change.get("is_initial_baseline"):
+                            st.info("Initial event baseline - no previous snapshot is available for comparison.")
+                        elif latest_change.get("change_level") == "none":
+                            st.info("No meaningful change detected since the previous snapshot.")
+                        else:
+                            st.info(latest_change.get("deterministic_change_summary") or "No change summary available.")
+                    else:
+                        st.info("Initial event baseline - no previous snapshot is available for comparison.")
+                else:
+                    st.info("No event snapshot exists yet. Use Create snapshot to establish the first baseline.")
+
+                latest_brief = event_briefs[0] if event_briefs else None
+                if latest_brief:
+                    st.write("##### Latest Event Brief")
+                    st.caption(
+                        f"Status: {latest_brief.get('brief_status')} | "
+                        f"Generation: {latest_brief.get('generation_method')} | "
+                        f"Created: {format_datetime_value(latest_brief.get('created_at'))}"
+                    )
+                    st.write(f"**{latest_brief['headline']}**")
+                    for label, field in [
+                        ("What happened", "what_happened"),
+                        ("What changed", "what_changed"),
+                        ("Why it matters", "why_it_matters"),
+                    ]:
+                        if latest_brief.get(field):
+                            st.write(f"**{label}**")
+                            st.write(latest_brief[field])
+                    for label, field in [
+                        ("Confirmed", "confirmed_points"),
+                        ("Uncertainties", "uncertainties"),
+                        ("What to watch next", "watch_next"),
+                    ]:
+                        values = latest_brief.get(field) or []
+                        if values:
+                            st.write(f"**{label}**")
+                            for value in values:
+                                st.write(f"- {value}")
+                    evidence_rows = []
+                    for item in latest_brief.get("evidence_items", []):
+                        evidence_rows.append(
+                            {
+                                "Document ID": item.get("document_id"),
+                                "Title": item.get("title"),
+                                "Publisher": item.get("publisher") or item.get("source_name") or format_missing(),
+                                "Published": format_date_value(item.get("published_date")),
+                                "URL": item.get("url"),
+                            }
+                        )
+                    if evidence_rows:
+                        st.write("**Evidence**")
+                        st.dataframe(evidence_rows, use_container_width=True, hide_index=True)
+                        with st.expander("Evidence links"):
+                            for item in latest_brief.get("evidence_items", []):
+                                if item.get("url"):
+                                    title = item.get("title") or f"Document {item.get('document_id')}"
+                                    st.markdown(f"- [{title}]({item['url']})")
+                else:
+                    st.info("No event brief exists yet. Use Generate event brief after creating a snapshot.")
+
+                if event_snapshots or event_briefs:
+                    with st.expander("Snapshot and brief history"):
+                        brief_status_by_snapshot = {
+                            brief.get("snapshot_id"): brief.get("brief_status")
+                            for brief in event_briefs
+                        }
+                        history_rows = []
+                        snapshots_ascending = sorted(
+                            event_snapshots,
+                            key=lambda item: _datetime_sort_value(item.get("created_at")),
+                        )
+                        history_change_by_id = {}
+                        previous_snapshot = None
+                        for snapshot in snapshots_ascending:
+                            history_change_by_id[snapshot.get("id")] = snapshot_history_change_level(
+                                previous_snapshot,
+                                snapshot,
+                            )
+                            previous_snapshot = snapshot
+                        for snapshot in event_snapshots:
+                            history_rows.append(
+                                {
+                                    "Snapshot": snapshot.get("id"),
+                                    "Created": format_datetime_value(snapshot.get("created_at")),
+                                    "Documents": snapshot.get("document_count", 0),
+                                    "Publishers": snapshot.get("distinct_publisher_count", 0),
+                                    "Change": history_change_by_id.get(snapshot.get("id"), "not available"),
+                                    "Brief status": brief_status_by_snapshot.get(snapshot.get("id"), "No brief"),
+                                }
+                            )
+                        if history_rows:
+                            st.dataframe(history_rows, use_container_width=True, hide_index=True)
 
                 st.write("#### Supporting documents and evidence")
                 if not event_documents:
