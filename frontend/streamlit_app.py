@@ -13,6 +13,7 @@ st.caption("RAG-based policy briefing assistant for AI governance and foreign po
 
 page = st.sidebar.radio("Go to", ["Start Here",
         "Dashboard",
+        "Events",
         "System Status", "Sources",
         "Source Pack", "Ingest URL", "Documents", "Semantic Search",
         "Ask Knowledge Base",
@@ -20,20 +21,95 @@ page = st.sidebar.radio("Go to", ["Start Here",
         "Review Briefs",
         "Export Brief", "Briefs", "Audit Logs", "Governance"])
 
-def api_get(path: str, params: dict | None = None):
-    r = requests.get(f"{API_BASE_URL}{path}", params=params, timeout=60)
-    r.raise_for_status()
-    return r.json()
+class FrontendAPIError(Exception):
+    def __init__(self, message: str):
+        super().__init__(message)
+        self.message = message
 
-def api_post(path: str, payload: dict | None = None):
-    r = requests.post(f"{API_BASE_URL}{path}", json=payload, timeout=180)
-    r.raise_for_status()
-    return r.json()
 
-def api_patch(path: str, payload: dict | None = None):
-    r = requests.patch(f"{API_BASE_URL}{path}", json=payload, timeout=60)
-    r.raise_for_status()
-    return r.json()
+def _safe_text(value) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _is_sensitive_error_detail(message: str) -> bool:
+    lowered = message.lower()
+    sensitive_markers = [
+        "traceback",
+        "sqlalchemy",
+        "psycopg",
+        "postgres",
+        "select ",
+        "insert ",
+        "update ",
+        "delete ",
+        " from ",
+        "null value",
+        "constraint",
+    ]
+    return any(marker in lowered for marker in sensitive_markers)
+
+
+def _concise_error(message: str, fallback: str = "Request failed.") -> str:
+    text = " ".join(_safe_text(message).split())
+    if not text:
+        return fallback
+    if _is_sensitive_error_detail(text):
+        return fallback
+    return text[:220]
+
+
+def _extract_response_detail(response) -> str:
+    try:
+        payload = response.json()
+    except ValueError:
+        return ""
+    if isinstance(payload, dict):
+        detail = payload.get("detail") or payload.get("message")
+        if isinstance(detail, (str, int, float)):
+            return str(detail)
+    return ""
+
+
+def _request_json(method: str, path: str, *, params: dict | None = None, payload: dict | None = None, timeout: int):
+    try:
+        response = requests.request(
+            method,
+            f"{API_BASE_URL}{path}",
+            params=params,
+            json=payload,
+            timeout=timeout,
+        )
+    except requests.exceptions.Timeout as exc:
+        raise FrontendAPIError("Request timed out. Confirm that the backend is running and try again.") from exc
+    except requests.exceptions.ConnectionError as exc:
+        raise FrontendAPIError("Backend is not reachable. Confirm that the backend is running.") from exc
+    except requests.exceptions.RequestException as exc:
+        raise FrontendAPIError(_concise_error(str(exc), "Could not contact the backend.")) from exc
+
+    if response.status_code >= 400:
+        detail = _extract_response_detail(response)
+        if response.status_code == 404 and detail:
+            raise FrontendAPIError(_concise_error(detail, "Requested record was not found."))
+        raise FrontendAPIError(_concise_error(detail, f"Backend request failed with status {response.status_code}."))
+
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise FrontendAPIError("Backend returned malformed JSON.") from exc
+
+
+def api_get(path: str, params: dict | None = None, timeout: int = 20):
+    return _request_json("GET", path, params=params, timeout=timeout)
+
+
+def api_post(path: str, payload: dict | None = None, timeout: int = 180):
+    return _request_json("POST", path, payload=payload, timeout=timeout)
+
+
+def api_patch(path: str, payload: dict | None = None, timeout: int = 60):
+    return _request_json("PATCH", path, payload=payload, timeout=timeout)
 
 
 NO_SOURCE_SELECTED_LABEL = "No source selected"
@@ -91,18 +167,398 @@ def build_url_ingest_payload(
     return payload
 
 
+def _parse_datetime(value):
+    if value is None or value == "":
+        return None
+    if hasattr(value, "isoformat") and not isinstance(value, str):
+        return value
+    try:
+        from datetime import datetime
+
+        return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def _parse_date_or_datetime(value):
+    parsed = _parse_datetime(value)
+    if parsed is not None:
+        return parsed
+    try:
+        from datetime import datetime
+
+        return datetime.fromisoformat(f"{value}T00:00:00")
+    except (TypeError, ValueError):
+        return None
+
+
+def format_missing(value: str = "Not available") -> str:
+    return value
+
+
+def format_date_value(value) -> str:
+    parsed = _parse_date_or_datetime(value)
+    if parsed is None:
+        return format_missing()
+    return parsed.strftime("%b %-d, %Y")
+
+
+def format_datetime_value(value) -> str:
+    parsed = _parse_datetime(value)
+    if parsed is None:
+        return format_missing()
+    return parsed.strftime("%b %-d, %Y %H:%M")
+
+
+def format_count(value, singular: str, plural: str | None = None) -> str:
+    try:
+        count = int(value or 0)
+    except (TypeError, ValueError):
+        count = 0
+    label = singular if count == 1 else (plural or f"{singular}s")
+    return f"{count:,} {label}"
+
+
+def format_similarity_score(value) -> str:
+    if value is None or value == "":
+        return format_missing()
+    try:
+        score = float(value)
+    except (TypeError, ValueError):
+        return format_missing()
+    percent = score * 100 if score <= 1 else score
+    rounded = round(percent, 1)
+    if rounded.is_integer():
+        return f"{int(rounded)}%"
+    return f"{rounded:.1f}%"
+
+
+def readable_value(value) -> str:
+    text = _safe_text(value)
+    return text if text else format_missing()
+
+
+def clustering_method_label(value) -> str:
+    method = _safe_text(value)
+    labels = {
+        "new_event": "Created as a new event",
+        "canonical_url": "Matched by canonical URL",
+        "exact_canonical_url": "Matched by canonical URL",
+        "normalized_url": "Matched by normalized URL",
+        "content_hash": "Matched by identical content",
+        "near_title": "Matched by similar title",
+        "near_duplicate_title": "Matched by similar title",
+        "title_similarity": "Matched by similar title",
+        "semantic_similarity": "Matched by content similarity",
+        "semantic_title_summary": "Matched by content similarity",
+    }
+    if method in labels:
+        return labels[method]
+    if not method:
+        return format_missing()
+    return f"Unknown method ({method.replace('_', ' ')})"
+
+
+def relationship_type_label(value) -> str:
+    relationship = _safe_text(value)
+    labels = {
+        "primary": "Primary event evidence",
+        "secondary": "Related evidence",
+    }
+    if relationship in labels:
+        return labels[relationship]
+    if not relationship:
+        return format_missing()
+    return relationship.replace("_", " ").title()
+
+
+def _to_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def normalize_event_payload(item: dict) -> dict:
+    if not isinstance(item, dict):
+        raise FrontendAPIError("Event data is malformed.")
+    event_id = _to_int(item.get("id"), default=-1)
+    if event_id < 0:
+        raise FrontendAPIError("Event data is incomplete.")
+
+    event = dict(item)
+    event["id"] = event_id
+    event["title"] = _safe_text(item.get("title")) or f"Event {event_id}"
+    event["summary"] = _safe_text(item.get("summary"))
+    event["event_type"] = _safe_text(item.get("event_type"))
+    event["status"] = _safe_text(item.get("status"))
+    event["primary_language"] = _safe_text(item.get("primary_language"))
+    event["country_or_region"] = _safe_text(item.get("country_or_region"))
+    event["related_document_count"] = _to_int(item.get("related_document_count"), 0)
+    event["distinct_source_count"] = _to_int(item.get("distinct_source_count"), 0)
+    event["distinct_publisher_count"] = _to_int(item.get("distinct_publisher_count"), event["distinct_source_count"])
+    return event
+
+
+def parse_event_list_response(payload) -> list[dict]:
+    if not isinstance(payload, list):
+        raise FrontendAPIError("Event list response was malformed.")
+    return [normalize_event_payload(item) for item in payload]
+
+
+def parse_event_detail_response(payload) -> dict:
+    if not isinstance(payload, dict):
+        raise FrontendAPIError("Event detail response was malformed.")
+    event = normalize_event_payload(payload)
+    related_documents = payload.get("related_documents", [])
+    if related_documents is None:
+        related_documents = []
+    if not isinstance(related_documents, list):
+        raise FrontendAPIError("Event detail documents were malformed.")
+    event["related_documents"] = parse_event_documents_response(related_documents)
+    return event
+
+
+def normalize_event_document_payload(item: dict) -> dict:
+    if not isinstance(item, dict):
+        raise FrontendAPIError("Event document data is malformed.")
+    document_id = _to_int(item.get("document_id"), default=-1)
+    if document_id < 0:
+        raise FrontendAPIError("Event document data is incomplete.")
+    document = dict(item)
+    document["document_id"] = document_id
+    document["event_id"] = _to_int(item.get("event_id"), 0)
+    document["document_title"] = _safe_text(item.get("document_title")) or f"Document {document_id}"
+    document["source_name"] = _safe_text(item.get("source_name"))
+    document["publisher"] = _safe_text(item.get("publisher"))
+    document["url"] = _safe_text(item.get("url"))
+    document["relationship_type"] = _safe_text(item.get("relationship_type"))
+    document["clustering_method"] = _safe_text(item.get("clustering_method"))
+    return document
+
+
+def parse_event_documents_response(payload) -> list[dict]:
+    if not isinstance(payload, list):
+        raise FrontendAPIError("Event documents response was malformed.")
+    return [normalize_event_document_payload(item) for item in payload]
+
+
+def event_source_count(event: dict) -> int:
+    return max(
+        _to_int(event.get("distinct_source_count"), 0),
+        _to_int(event.get("distinct_publisher_count"), 0),
+    )
+
+
+def publisher_or_source_key(document: dict) -> str:
+    explicit = _safe_text(document.get("publisher")) or _safe_text(document.get("source_name"))
+    if explicit:
+        return explicit.lower()
+    url = _safe_text(document.get("url"))
+    if not url:
+        return ""
+    try:
+        from urllib.parse import urlparse as parse_url
+
+        return parse_url(url).netloc.lower()
+    except ValueError:
+        return ""
+
+
+def distinct_publisher_count(documents: list[dict]) -> int:
+    return len({key for key in (publisher_or_source_key(document) for document in documents) if key})
+
+
+def event_overview_metrics(events: list[dict], now=None) -> dict:
+    from datetime import datetime, timedelta, timezone
+
+    current_time = now or datetime.now(timezone.utc)
+    if current_time.tzinfo is not None:
+        current_time = current_time.astimezone(timezone.utc).replace(tzinfo=None)
+    recent_cutoff = current_time - timedelta(days=7)
+    total_events = len(events)
+    total_documents = sum(_to_int(event.get("related_document_count"), 0) for event in events)
+    multi_document_events = sum(
+        1 for event in events if _to_int(event.get("related_document_count"), 0) > 1
+    )
+    multi_source_events = sum(1 for event in events if event_source_count(event) > 1)
+    recent_events = 0
+    for event in events:
+        parsed = _parse_datetime(event.get("last_seen_at"))
+        if parsed is None:
+            continue
+        if parsed.tzinfo is not None:
+            parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+        if recent_cutoff <= parsed <= current_time:
+            recent_events += 1
+    return {
+        "total_events": total_events,
+        "total_documents": total_documents,
+        "multi_document_events": multi_document_events,
+        "multi_source_events": multi_source_events,
+        "recently_updated_events": recent_events,
+    }
+
+
+def event_filter_options(events: list[dict], field: str) -> list[str]:
+    return sorted({_safe_text(event.get(field)) for event in events if _safe_text(event.get(field))})
+
+
+def filter_events(
+    events: list[dict],
+    *,
+    text_query: str = "",
+    statuses: list[str] | None = None,
+    event_types: list[str] | None = None,
+    countries: list[str] | None = None,
+    languages: list[str] | None = None,
+    min_documents: int = 0,
+    multi_source_only: bool = False,
+) -> list[dict]:
+    query = _safe_text(text_query).lower()
+    status_values = set(statuses or [])
+    type_values = set(event_types or [])
+    country_values = set(countries or [])
+    language_values = set(languages or [])
+    minimum_documents = max(_to_int(min_documents, 0), 0)
+
+    filtered = []
+    for event in events:
+        if query:
+            haystack = f"{event.get('title', '')} {event.get('summary', '')}".lower()
+            if query not in haystack:
+                continue
+        if status_values and event.get("status") not in status_values:
+            continue
+        if type_values and event.get("event_type") not in type_values:
+            continue
+        if country_values and event.get("country_or_region") not in country_values:
+            continue
+        if language_values and event.get("primary_language") not in language_values:
+            continue
+        if _to_int(event.get("related_document_count"), 0) < minimum_documents:
+            continue
+        if multi_source_only and event_source_count(event) <= 1:
+            continue
+        filtered.append(event)
+    return filtered
+
+
+def _datetime_sort_value(value) -> float:
+    parsed = _parse_date_or_datetime(value)
+    if parsed is None:
+        return float("-inf")
+    try:
+        return parsed.timestamp()
+    except (OSError, ValueError):
+        return float("-inf")
+
+
+def sort_events(events: list[dict], sort_by: str) -> list[dict]:
+    if sort_by == "First seen":
+        return sorted(events, key=lambda event: _datetime_sort_value(event.get("first_seen_at")), reverse=True)
+    if sort_by == "Document count":
+        return sorted(events, key=lambda event: (_to_int(event.get("related_document_count"), 0), event.get("title", "").lower()), reverse=True)
+    if sort_by == "Source or publisher count":
+        return sorted(events, key=lambda event: (event_source_count(event), event.get("title", "").lower()), reverse=True)
+    if sort_by == "Title":
+        return sorted(events, key=lambda event: event.get("title", "").lower())
+    return sorted(events, key=lambda event: _datetime_sort_value(event.get("last_seen_at")), reverse=True)
+
+
+def timeline_sort_value(document: dict) -> float:
+    published = _datetime_sort_value(document.get("published_date"))
+    if published != float("-inf"):
+        return published
+    return _datetime_sort_value(document.get("fetched_at"))
+
+
+def timeline_documents(documents: list[dict]) -> list[dict]:
+    return sorted(documents, key=timeline_sort_value)
+
+
+def _session_cache():
+    streamlit = globals().get("st")
+    if streamlit is None:
+        return None
+    return streamlit.session_state.setdefault("event_api_cache", {})
+
+
+def _cached_event_fetch(cache_key: str, fetcher, *, force_refresh: bool = False, ttl_seconds: int = 30):
+    cache = _session_cache()
+    if cache is None:
+        return fetcher()
+
+    import time
+
+    now = time.time()
+    cached = cache.get(cache_key)
+    if not force_refresh and cached and now - cached["timestamp"] < ttl_seconds:
+        return cached["data"]
+
+    data = fetcher()
+    cache[cache_key] = {"timestamp": now, "data": data}
+    return data
+
+
+def clear_event_cache(event_id: int | None = None) -> None:
+    cache = _session_cache()
+    if cache is None:
+        return
+    if event_id is None:
+        cache.clear()
+        return
+    for key in ["events:list", f"events:detail:{event_id}", f"events:documents:{event_id}"]:
+        cache.pop(key, None)
+
+
+def get_events(force_refresh: bool = False) -> list[dict]:
+    return _cached_event_fetch(
+        "events:list",
+        lambda: parse_event_list_response(api_get("/events")),
+        force_refresh=force_refresh,
+    )
+
+
+def get_event(event_id: int, force_refresh: bool = False) -> dict:
+    return _cached_event_fetch(
+        f"events:detail:{event_id}",
+        lambda: parse_event_detail_response(api_get(f"/events/{event_id}")),
+        force_refresh=force_refresh,
+    )
+
+
+def get_event_documents(event_id: int, force_refresh: bool = False) -> list[dict]:
+    return _cached_event_fetch(
+        f"events:documents:{event_id}",
+        lambda: parse_event_documents_response(api_get(f"/events/{event_id}/documents")),
+        force_refresh=force_refresh,
+    )
+
+
+def recluster_document(document_id: int) -> dict:
+    payload = api_post(f"/events/recluster/{document_id}", timeout=60)
+    if not isinstance(payload, dict):
+        raise FrontendAPIError("Reclustering response was malformed.")
+    if payload.get("status") != "ok":
+        raise FrontendAPIError("Reclustering did not complete.")
+    return payload
+
+
 def get_api_error_detail(exc: Exception) -> str:
+    if isinstance(exc, FrontendAPIError):
+        return exc.message
     response = getattr(exc, "response", None)
     if response is None:
-        return str(exc)
+        return _concise_error(str(exc), "Request failed.")
 
     try:
         payload = response.json()
     except ValueError:
-        return response.text or str(exc)
+        return _concise_error(response.text, "Request failed.")
 
     detail = payload.get("detail") if isinstance(payload, dict) else None
-    return str(detail or payload or exc)
+    return _concise_error(str(detail or payload or exc), "Request failed.")
 
 
 
@@ -231,6 +687,270 @@ elif page == "Dashboard":
     except Exception as exc:
         st.error("Could not load dashboard metrics.")
         st.code(str(exc))
+
+elif page == "Events":
+    st.subheader("Events")
+    st.caption("Event-oriented view of media intelligence. Documents remain the supporting evidence layer.")
+
+    refresh_col, note_col = st.columns([1, 4])
+    with refresh_col:
+        if st.button("Refresh event data"):
+            clear_event_cache()
+            st.session_state.pop("selected_event_id", None)
+            st.success("Event data refreshed.")
+    with note_col:
+        st.info("Event data is loaded from the backend API. Run event backfill if no events are shown.")
+
+    try:
+        with st.spinner("Loading events..."):
+            events = get_events()
+    except Exception as exc:
+        st.error(get_api_error_detail(exc))
+        st.info("Confirm that the backend is running on the configured API URL, then refresh event data.")
+        events = []
+
+    if not events:
+        st.info("No events yet. Ingest documents and run the event backfill to populate event intelligence.")
+    else:
+        metrics = event_overview_metrics(events)
+        metric_cols = st.columns(5)
+        metric_cols[0].metric("Events", metrics["total_events"])
+        metric_cols[1].metric("Related documents", metrics["total_documents"])
+        metric_cols[2].metric("Multi-document events", metrics["multi_document_events"])
+        metric_cols[3].metric("Multi-source events", metrics["multi_source_events"])
+        metric_cols[4].metric("Updated in 7 days", metrics["recently_updated_events"])
+
+        st.write("### Filters")
+        if st.button("Reset filters"):
+            for key, value in {
+                "event_text_filter": "",
+                "event_status_filter": [],
+                "event_type_filter": [],
+                "event_region_filter": [],
+                "event_language_filter": [],
+                "event_min_documents": 0,
+                "event_multi_source_only": False,
+                "event_sort_by": "Newest activity",
+            }.items():
+                st.session_state[key] = value
+            st.rerun()
+
+        filter_col_1, filter_col_2, filter_col_3 = st.columns(3)
+        with filter_col_1:
+            text_query = st.text_input("Search title or summary", key="event_text_filter")
+            statuses = st.multiselect(
+                "Status",
+                event_filter_options(events, "status"),
+                key="event_status_filter",
+            )
+            min_documents = st.number_input(
+                "Minimum related documents",
+                min_value=0,
+                step=1,
+                key="event_min_documents",
+            )
+        with filter_col_2:
+            event_types = st.multiselect(
+                "Event type",
+                event_filter_options(events, "event_type"),
+                key="event_type_filter",
+            )
+            countries = st.multiselect(
+                "Country or region",
+                event_filter_options(events, "country_or_region"),
+                key="event_region_filter",
+            )
+            multi_source_only = st.checkbox("Multi-source events only", key="event_multi_source_only")
+        with filter_col_3:
+            languages = st.multiselect(
+                "Language",
+                event_filter_options(events, "primary_language"),
+                key="event_language_filter",
+            )
+            sort_by = st.selectbox(
+                "Sort by",
+                [
+                    "Newest activity",
+                    "First seen",
+                    "Document count",
+                    "Source or publisher count",
+                    "Title",
+                ],
+                key="event_sort_by",
+            )
+
+        filtered_events = filter_events(
+            events,
+            text_query=text_query,
+            statuses=statuses,
+            event_types=event_types,
+            countries=countries,
+            languages=languages,
+            min_documents=min_documents,
+            multi_source_only=multi_source_only,
+        )
+        sorted_filtered_events = sort_events(filtered_events, sort_by)
+
+        st.write("### Event List")
+        st.caption(f"Showing {len(sorted_filtered_events)} of {len(events)} events.")
+
+        if not sorted_filtered_events:
+            st.warning("No events match the current filters.")
+        else:
+            for event in sorted_filtered_events:
+                st.markdown("---")
+                title_col, action_col = st.columns([5, 1])
+                with title_col:
+                    st.write(f"#### {event['title']}")
+                    if event.get("summary"):
+                        st.write(event["summary"])
+
+                    metadata = []
+                    for label, field in [
+                        ("Type", "event_type"),
+                        ("Status", "status"),
+                        ("Region", "country_or_region"),
+                        ("Language", "primary_language"),
+                    ]:
+                        if event.get(field):
+                            metadata.append(f"**{label}:** {event[field]}")
+                    if event.get("first_seen_at"):
+                        metadata.append(f"**First seen:** {format_datetime_value(event.get('first_seen_at'))}")
+                    if event.get("last_seen_at"):
+                        metadata.append(f"**Last seen:** {format_datetime_value(event.get('last_seen_at'))}")
+                    if metadata:
+                        st.markdown(" | ".join(metadata))
+
+                    coverage = [
+                        format_count(event.get("related_document_count"), "related document"),
+                        format_count(event_source_count(event), "distinct publisher"),
+                    ]
+                    if event_source_count(event) > 1:
+                        coverage.append("Reported by multiple sources")
+                    st.caption(" | ".join(coverage))
+                with action_col:
+                    if st.button("Open", key=f"open_event_{event['id']}"):
+                        st.session_state["selected_event_id"] = event["id"]
+
+        selected_event_id = st.session_state.get("selected_event_id")
+        if selected_event_id:
+            st.markdown("---")
+            try:
+                with st.spinner("Loading event detail..."):
+                    event_detail = get_event(selected_event_id)
+                    event_documents = get_event_documents(selected_event_id)
+            except Exception as exc:
+                st.error(get_api_error_detail(exc))
+                st.info("Refresh event data and confirm that the selected event still exists.")
+                event_detail = None
+                event_documents = []
+
+            if event_detail:
+                st.write("### Event Detail")
+                st.write(f"#### {event_detail['title']}")
+                if event_detail.get("summary"):
+                    st.write(event_detail["summary"])
+
+                source_count = distinct_publisher_count(event_documents)
+                detail_cols = st.columns(4)
+                detail_cols[0].metric("Related documents", len(event_documents))
+                detail_cols[1].metric("Distinct publishers", source_count)
+                detail_cols[2].metric("First seen", format_datetime_value(event_detail.get("first_seen_at")))
+                detail_cols[3].metric("Last seen", format_datetime_value(event_detail.get("last_seen_at")))
+
+                metadata_rows = []
+                for label, field in [
+                    ("Event type", "event_type"),
+                    ("Status", "status"),
+                    ("Country or region", "country_or_region"),
+                    ("Primary language", "primary_language"),
+                ]:
+                    if event_detail.get(field):
+                        metadata_rows.append({"Field": label, "Value": event_detail[field]})
+                if metadata_rows:
+                    st.write("#### Event-level metadata")
+                    st.dataframe(metadata_rows, use_container_width=True, hide_index=True)
+
+                st.write("#### Supporting documents and evidence")
+                if not event_documents:
+                    st.info("This event has no related documents yet.")
+                else:
+                    st.caption(
+                        f"{format_count(len(event_documents), 'related document')} | "
+                        f"{format_count(source_count, 'distinct publisher')}"
+                    )
+                    if source_count > 1:
+                        st.info("Reported by multiple sources. This does not by itself prove source independence.")
+
+                    for document in event_documents:
+                        label_parts = [document["document_title"]]
+                        source_label = document.get("publisher") or document.get("source_name")
+                        if source_label:
+                            label_parts.append(source_label)
+                        with st.expander(" | ".join(label_parts)):
+                            doc_cols = st.columns(2)
+                            with doc_cols[0]:
+                                if source_label:
+                                    st.write(f"**Source / publisher:** {source_label}")
+                                if document.get("published_date"):
+                                    st.write(f"**Published:** {format_date_value(document.get('published_date'))}")
+                                if document.get("fetched_at"):
+                                    st.write(f"**Fetched:** {format_datetime_value(document.get('fetched_at'))}")
+                                if document.get("url"):
+                                    st.markdown(f"**URL:** [{document['url']}]({document['url']})")
+                            with doc_cols[1]:
+                                st.write(f"**Relationship:** {relationship_type_label(document.get('relationship_type'))}")
+                                st.write(f"**Clustering:** {clustering_method_label(document.get('clustering_method'))}")
+                                st.write(f"**Similarity:** {format_similarity_score(document.get('similarity_score'))}")
+                            with st.expander("Advanced technical values"):
+                                st.write(f"Document ID: {document['document_id']}")
+                                st.write(f"Event ID: {document.get('event_id')}")
+                                st.write(f"Relationship type: {readable_value(document.get('relationship_type'))}")
+                                st.write(f"Clustering method: {readable_value(document.get('clustering_method'))}")
+                                st.write(f"Similarity score: {readable_value(document.get('similarity_score'))}")
+
+                    st.write("#### Source timeline")
+                    timeline_rows = []
+                    for document in timeline_documents(event_documents):
+                        timeline_date = document.get("published_date") or document.get("fetched_at")
+                        timeline_rows.append(
+                            {
+                                "Date": format_date_value(timeline_date),
+                                "Basis": "Published" if document.get("published_date") else "Fetched",
+                                "Source / publisher": document.get("publisher") or document.get("source_name") or format_missing(),
+                                "Document": document["document_title"],
+                                "Clustering": clustering_method_label(document.get("clustering_method")),
+                                "Similarity": format_similarity_score(document.get("similarity_score")),
+                            }
+                        )
+                    st.dataframe(timeline_rows, use_container_width=True, hide_index=True)
+
+                    with st.expander("Advanced"):
+                        recluster_document_id = st.selectbox(
+                            "Document to recluster",
+                            [document["document_id"] for document in event_documents],
+                            format_func=lambda doc_id: next(
+                                (
+                                    f"{document['document_id']} - {document['document_title']}"
+                                    for document in event_documents
+                                    if document["document_id"] == doc_id
+                                ),
+                                str(doc_id),
+                            ),
+                        )
+                        if st.button("Recluster selected document"):
+                            try:
+                                result = recluster_document(recluster_document_id)
+                                clear_event_cache(selected_event_id)
+                                clear_event_cache(result.get("event_id"))
+                                clear_event_cache(None)
+                                st.success(
+                                    "Reclustering completed: "
+                                    f"{clustering_method_label(result.get('clustering_method'))} "
+                                    f"({format_similarity_score(result.get('similarity_score'))})."
+                                )
+                            except Exception as exc:
+                                st.error(get_api_error_detail(exc))
 
 elif page == "System Status":
 

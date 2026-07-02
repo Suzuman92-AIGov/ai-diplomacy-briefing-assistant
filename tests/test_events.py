@@ -346,6 +346,8 @@ def test_event_api_responses(event_db, source):
 
     assert list_response.status_code == 200
     assert list_response.json()[0]["related_document_count"] == 1
+    assert list_response.json()[0]["distinct_source_count"] == 1
+    assert list_response.json()[0]["distinct_publisher_count"] == 1
     assert detail_response.status_code == 200
     assert detail_response.json()["related_documents"][0]["document_title"] == document.title
     assert documents_response.status_code == 200

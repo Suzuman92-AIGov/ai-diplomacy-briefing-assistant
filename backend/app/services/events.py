@@ -343,7 +343,17 @@ def event_document_count(db: Session, event_id: int) -> int:
     return db.query(EventDocument).filter(EventDocument.event_id == event_id).count()
 
 
+def event_distinct_source_count(event: Event) -> int:
+    source_names = {
+        link.document.source.name.strip()
+        for link in event.documents
+        if link.document and link.document.source and link.document.source.name
+    }
+    return len(source_names)
+
+
 def serialize_event(db: Session, event: Event, *, include_documents: bool = False) -> dict:
+    distinct_source_count = event_distinct_source_count(event)
     payload = {
         "id": event.id,
         "title": event.title,
@@ -358,6 +368,8 @@ def serialize_event(db: Session, event: Event, *, include_documents: bool = Fals
         "created_at": event.created_at,
         "updated_at": event.updated_at,
         "related_document_count": event_document_count(db, event.id),
+        "distinct_source_count": distinct_source_count,
+        "distinct_publisher_count": distinct_source_count,
     }
     if include_documents:
         payload["related_documents"] = [

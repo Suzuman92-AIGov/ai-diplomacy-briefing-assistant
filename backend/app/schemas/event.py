@@ -22,6 +22,8 @@ class EventBase(BaseModel):
 
 class EventRead(EventBase):
     related_document_count: int = 0
+    distinct_source_count: int = 0
+    distinct_publisher_count: int = 0
 
 
 class EventDocumentRead(BaseModel):
