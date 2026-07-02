@@ -14,3 +14,4 @@ scikit-learn
 joblib
 lxml_html_clean
 pytest
+pypdf>=4.3,<6

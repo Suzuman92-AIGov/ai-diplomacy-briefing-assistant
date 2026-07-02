@@ -3,7 +3,7 @@ from sqlalchemy.orm import Session
 
 from app.db.session import get_db
 from app.schemas.ingest import UrlIngestRequest, UrlIngestResponse
-from app.services.ingestion import ingest_url
+from app.services.ingestion import IngestionError, ingest_url, sanitize_error_message
 
 router = APIRouter(prefix="/ingest", tags=["ingestion"])
 
@@ -19,10 +19,15 @@ def ingest_public_url(payload: UrlIngestRequest, db: Session = Depends(get_db)):
             sensitivity_level=payload.sensitivity_level,
             language=payload.language,
         )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except IngestionError as exc:
+        db.rollback()
+        raise HTTPException(status_code=exc.status_code, detail=exc.public_message) from exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Ingestion failed: {exc}") from exc
+        db.rollback()
+        raise HTTPException(
+            status_code=500,
+            detail=sanitize_error_message("Ingestion failed. The document could not be saved safely."),
+        ) from exc
 
     return UrlIngestResponse(
         status="ok",

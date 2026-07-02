@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from app.api.routes.admin import router as admin_router
 from app.api.routes.dashboard import router as dashboard_router
+from app.api.routes.event_briefs import router as event_briefs_router
+from app.api.routes.events import router as events_router
 from app.api.routes.export import router as export_router
 from app.api.routes.audit_logs import router as audit_logs_router
 from app.api.routes.briefs import router as briefs_router
@@ -25,6 +27,8 @@ app.include_router(dashboard_router)
 app.include_router(export_router)
 app.include_router(sources_router)
 app.include_router(documents_router)
+app.include_router(events_router)
+app.include_router(event_briefs_router)
 app.include_router(ingest_router)
 app.include_router(search_router)
 app.include_router(rag_router)
