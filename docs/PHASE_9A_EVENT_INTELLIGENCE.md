@@ -1,5 +1,7 @@
 # Phase 9A Event Intelligence Foundation
 
+> Historical phase note: this document describes the architecture introduced in Phase 9A. For the current public overview, see the root [README](../README.md).
+
 ## Current Document Flow
 
 The current system is document-first:

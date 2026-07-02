@@ -1,5 +1,7 @@
 # Phase 9B Event Intelligence Streamlit UI
 
+> Historical phase note: this document describes the Events UI work introduced in Phase 9B. Later Phase 10A work added reliable text-based PDF ingestion. For current public behavior, see the root [README](../README.md) and [Phase 10A PDF ingestion](PHASE_10A_PDF_INGESTION.md).
+
 ## 1. Current Streamlit Architecture And Navigation
 
 The frontend is a single Streamlit application in `frontend/streamlit_app.py`. It configures the page, defines lightweight HTTP helper functions, and selects page content through one sidebar radio navigation control.

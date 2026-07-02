@@ -1,5 +1,7 @@
 # Case Study: Building an AI Diplomacy Briefing Assistant
 
+> Portfolio note: this case study describes the original RAG-style briefing prototype. The current v0.10.0 public overview adds event intelligence, snapshots, change detection, event briefs, and text-based PDF ingestion. See the root [README](../../README.md).
+
 ## 1. Problem
 
 Public diplomacy and policy teams increasingly need to monitor fast-moving developments in AI governance, AI regulation, digital policy and international technology competition.

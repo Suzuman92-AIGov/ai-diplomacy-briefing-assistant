@@ -1,5 +1,7 @@
 # Governance Controls
 
+> Portfolio note: this document describes governance concepts for the local prototype. The current v0.10.0 event-intelligence overview is in the root [README](../../README.md).
+
 ## 1. Approved Source Registry
 
 The system starts from curated sources rather than arbitrary web content.

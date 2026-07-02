@@ -1,58 +1,75 @@
 # Setup Guide
 
-This guide runs the project locally in **local demo mode**, without OpenAI API billing.
+This guide runs the project locally in deterministic demo mode. OpenAI configuration is optional.
 
 ## Requirements
 
-Install:
-
 - Python 3.11+
-- Docker Desktop
-- VS Code or another code editor
+- Docker Desktop or compatible Docker Compose runtime
 
-## 1. Create local environment file
+## 1. Create a Virtual Environment
 
-From the project root:
+From the repository root:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+```
+
+Install backend and frontend dependencies:
+
+```bash
+python3 -m pip install -r backend/requirements.txt
+python3 -m pip install -r frontend/requirements.txt
+```
+
+## 2. Optional Environment File
+
+The defaults run locally without an API key. If you want to override settings:
 
 ```bash
 cp .env.example .env
 ```
 
-In `.env`, use:
+Use local deterministic mode unless you have configured a model provider:
 
 ```text
 EMBEDDING_PROVIDER=local
 ANSWER_PROVIDER=local
 API_BASE_URL=http://localhost:8002
-OPENAI_API_KEY=your_api_key_here
 ```
 
-You do **not** need a real OpenAI API key in local mode.
+Do not commit `.env`.
 
-## 2. Start database
+## 3. Start PostgreSQL
 
 ```bash
-docker rm -f ai_diplomacy_pgvector || true
 docker compose up -d db
 ```
 
-## 3. Start backend
+## 4. Start FastAPI
+
+From a terminal with the virtual environment active:
 
 ```bash
 cd backend
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install -r requirements.txt
 python3 -m uvicorn app.main:app --reload --port 8002
 ```
 
 Keep this terminal open.
 
-## 4. Initialize database
+Swagger is available at:
 
-Open a new terminal:
+```text
+http://localhost:8002/docs
+```
+
+## 5. Initialize Database
+
+Open another terminal from the repository root:
 
 ```bash
+source .venv/bin/activate
 curl -X POST http://localhost:8002/admin/init-db
 ```
 
@@ -62,45 +79,54 @@ Expected response:
 {"status":"ok","message":"Database initialized."}
 ```
 
-## 5. Start frontend
-
-Open another terminal:
+For an existing database created before the event-intelligence migrations, apply the additive SQL files manually before using Events:
 
 ```bash
-cd frontend
-python3 -m venv .venv
+psql "$DATABASE_URL" -f backend/migrations/versions/20260702_0900_phase_9a_events.sql
+psql "$DATABASE_URL" -f backend/migrations/versions/20260702_1200_phase_9c_event_snapshots_briefs.sql
+```
+
+## 6. Start Streamlit
+
+From the repository root:
+
+```bash
 source .venv/bin/activate
-python3 -m pip install -r requirements.txt
-API_BASE_URL=http://localhost:8002 python3 -m streamlit run streamlit_app.py --server.port 8502
+python3 -m streamlit run frontend/streamlit_app.py --server.port 8501
 ```
 
 Open:
 
 ```text
-http://localhost:8502
+http://localhost:8501
 ```
 
-## Recommended Demo Flow
+## 7. Recommended First Workflow
 
-1. Start Here → Run demo setup
-2. Documents → Create chunks / check existing chunks
-3. Documents → Generate embeddings / prepare searchable representations
-4. Ask Knowledge Base → ask a source-grounded question
-5. Generate Brief → create a structured policy brief
-6. Review Briefs → update review status
-7. Export Brief → export as Markdown
-8. Dashboard → show updated metrics
-9. Audit Logs → show traceability
+1. System Status: initialize database tables.
+2. Source Pack: load curated sources.
+3. Source Pack or Ingest URL: ingest an HTML page or text-based PDF.
+4. Documents: inspect the document and create chunks if you need search/RAG/document briefs.
+5. Admin API, if needed: run event backfill for older documents.
+6. Events: inspect event evidence and timeline.
+7. Events: create an event snapshot.
+8. Events: generate an event brief.
+9. Events or review pages: review generated output before use.
+10. Audit Logs: check traceability.
+
+Optional event backfill:
+
+```bash
+curl -X POST "http://localhost:8002/admin/events/backfill?dry_run=true"
+curl -X POST "http://localhost:8002/admin/events/backfill?dry_run=false"
+```
 
 ## Stopping the App
 
-When finished:
-
-- press `Control + C` in the backend terminal;
-- press `Control + C` in the frontend terminal.
-
-Docker database can remain running, or you can stop it with:
+- Press `Control+C` in the backend terminal.
+- Press `Control+C` in the frontend terminal.
+- Stop PostgreSQL without deleting data:
 
 ```bash
-docker compose down
+docker compose stop db
 ```
