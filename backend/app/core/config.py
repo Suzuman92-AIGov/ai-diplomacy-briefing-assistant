@@ -21,6 +21,10 @@ class Settings(BaseSettings):
     event_near_duplicate_title_threshold: float = 0.92
     event_semantic_similarity_threshold: float = 0.78
     event_title_match_window_days: int = 14
+    ingestion_request_timeout_seconds: int = 30
+    ingestion_max_download_bytes: int = 25 * 1024 * 1024
+    ingestion_max_extracted_text_chars: int = 2_000_000
+    ingestion_error_max_chars: int = 240
 
     model_config = SettingsConfigDict(
         env_file="../.env",

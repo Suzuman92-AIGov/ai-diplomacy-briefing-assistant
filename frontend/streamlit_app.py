@@ -45,6 +45,10 @@ def _is_sensitive_error_detail(message: str) -> bool:
         "update ",
         "delete ",
         " from ",
+        "%pdf-",
+        "parameters:",
+        "statement:",
+        "binary",
         "null value",
         "constraint",
     ]

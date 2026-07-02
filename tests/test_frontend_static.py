@@ -375,6 +375,7 @@ def test_malformed_api_response_and_concise_errors():
         raise AssertionError("Malformed response should raise FrontendAPIError")
 
     assert namespace["_concise_error"]("Traceback SELECT * FROM documents", "Request failed.") == "Request failed."
+    assert namespace["_concise_error"]("psycopg.DataError %PDF-1.7 parameters: binary", "Request failed.") == "Request failed."
 
 
 def test_api_helper_handles_backend_unavailable_timeout_and_malformed_json():
